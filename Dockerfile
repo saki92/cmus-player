@@ -8,6 +8,8 @@ RUN apt-get update && \
     alsa-utils \
     pulseaudio-utils \
     tmux \
+    triggerhappy \
+    evtest \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a directory for music files (optional)
