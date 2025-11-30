@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  cmus:
+    # Option 1: If you already built and tagged your image
+    # Replace 'your-image-name:tag' with your actual image name
+    image: cmus-ubuntu:final
+    
+    # Option 2: Build from Dockerfile (if not already built)
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
+    
+    # Container name
+    container_name: cmus-player
+    
+    # Override the CMD to start playing automatically
+    command: |
+      bash -c '
+        # Install required packages for button handling (if not already installed)
+        echo "Checking for required packages..."
+        if ! command -v thd &> /dev/null || ! command -v evtest &> /dev/null; then
+          echo "Installing triggerhappy and evtest..."
+          apt-get update && apt-get install -y triggerhappy evtest
+        else
+          echo "Required packages already installed"
+        fi
+
+        # Create a config to disable MPRIS before first run
+        mkdir -p /root/.config/cmus
+        echo "set mpris=false" > /root/.config/cmus/rc
+
+        # Start CMUS in tmux session
+        tmux new-session -d -s cmus cmus
+        sleep 2
+        
+        # Configure and start playing
+        cmus-remote -C "set output_plugin=alsa" || true
+        cmus-remote -C "set dsp.alsa.device=hw:3,0" || true
+        cmus-remote -C "add /music" || true
+        sleep 5
+        cmus-remote -C "player-play" || true
+        cmus-remote -C "set repeat=true" || true
+
+        # Save setting
+        cmus-remote -C "save" || true
+
+        # Start button handler in tmux session
+        echo "Starting button handler in tmux..."
+        
+        # Create config
+        mkdir -p /etc/triggerhappy/triggers.d/
+        echo "KEY_VOLUMEUP	1	/usr/bin/cmus-remote -v +5" > /etc/triggerhappy/triggers.d/cmus.conf
+        echo "KEY_VOLUMEDOWN	1	/usr/bin/cmus-remote -v -5" >> /etc/triggerhappy/triggers.d/cmus.conf
+        
+        # Start thd in a separate tmux session
+        tmux new-session -d -s buttons "thd --triggers /etc/triggerhappy/triggers.d/ /dev/input/event0"
+        
+        echo "Button handler started in tmux session buttons"
+
+        # Keep container running
+        tail -f /dev/null
+      '
+
+    # Keep container running and allocate a pseudo-TTY
+    stdin_open: true
+    tty: true
+    
+    # Mount local music directory to container
+    # Adjust the path to your actual music directory
+    volumes:
+      - /home/orangepi/cmus-player/music:/music
+      - ~/.config/cmus:/root/.config/cmus  # Persist CMUS config
+      - ./button-handler.sh:/usr/local/bin/button-handler.sh:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - TERM=xterm-256color
+      - ALSA_CARD=3  # Set to your USB card number
+      - AUDIODEV=hw:3,0  # Set default audio device
+    
+    # If you need audio (for actual playback on Linux)
+    # devices:
+    #   - /dev/snd:/dev/snd
+    # privileged: true
+
+    # Audio device passthrough
+    devices:
+      - /dev/snd:/dev/snd  # ALSA devices
+      - /dev/bus/usb:/dev/bus/usb
+      - /dev/hidraw0:/dev/hidraw0  # USB speaker control
+      - /dev/input/event0:/dev/input/event0  # USB speaker buttons
+    
+    # Additional privileges for audio
+    group_add:
+      - audio
+
